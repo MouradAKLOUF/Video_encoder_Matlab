@@ -1,0 +1,131 @@
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%   This is the main function for the project : video encoder 
+%   MN910 – Advanced Compression , Master 2 research Multimedia Networking 
+%   Mourad AKLOUF & Maroua BAKOUR @ Telecom paristech 03/2018
+%
+% minimal inputs : videoFileName(char) , GOPtype(char) , QuantStep (This is a array)
+% outputs : myCompressedVideo.bin(char)= coded img saved in file,
+%           ploting of RD if QuantStep=array, 
+%           else bitRate(1) avrgPSNR(1) : if dim(QuantStep)=1*1
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+%%  inputs 
+
+clc, clear, close all;
+
+videoFileName = 'foreman_cif.y';
+% videoFileName2='akiyo_cif.yuv';
+
+GOPtype='IIII';               % 'IIII' or 'IPPP' 
+GOPsize=4;
+
+%Quant parameters
+QuantStep=[ 10  30  70  120  180 ];  
+
+%block size
+intraBlockSize=16;
+interBlockSize=16;
+searchWind1 =128;  %search wind for inter mode 
+searchWind2 =128;
+
+nbrGOPsForTest=5;  %how many GOPs u want to test , use small nbr small comput time
+
+%% 
+savedVideoFileName='myCompressedVideo.bin';  %output file name
+delete(savedVideoFileName); %delete if exists
+
+[rows,cols]= size(readFrame(videoFileName,10));  %size of 1 frame 
+videoSize=GetVideoSize(videoFileName,'y'); %nbr of frames in the vedio
+nbrOfGOPs=floor(videoSize/GOPsize);
+nbrRestFrames=videoSize-nbrOfGOPs*4;
+
+%% memory pre-allocate for speed 
+currentIMG=zeros(rows,cols,nbrGOPsForTest*GOPsize,'double');
+reconstactedIMG=zeros(rows,cols,nbrGOPsForTest*GOPsize,'double');
+%reconstactedIMG2=zeros(rows,cols,nbrGOPsForTest*4,'double');
+cost=zeros(1,nbrGOPsForTest*GOPsize,'double');
+mse=zeros(1,nbrGOPsForTest*GOPsize,'double');
+
+%%
+
+for ii=1:length(QuantStep)
+    
+delete(savedVideoFileName);         %delete  output file betwen 2 QuantSteps
+    
+delta0=QuantStep(ii); %for None
+delta1=QuantStep(ii); %for intra
+delta2=QuantStep(ii); %for inter
+
+tic;  
+
+l=1;
+for indx=1:nbrGOPsForTest %nbrOfGOPs  
+    
+ImgsInGOP= readGOP(videoFileName,GOPsize,indx-1,'y');
+
+if strcmp(GOPtype,'IIII')
+    
+      for k=1:GOPsize  
+      currentIMG(:,:,l) = ImgsInGOP(:,:,k);
+      [EncodedImgBitStream, reconstactedIMG(:,:,l), cost(l),mse(l),head] = getFrameI(currentIMG(:,:,l),intraBlockSize,delta1,'intra');  % change 'intra' to 'none' if u want to
+      HEAD=head'; writeInfile(HEAD(:),savedVideoFileName);
+      writeInfile(EncodedImgBitStream,savedVideoFileName);
+      l=l+1;
+      end
+      
+elseif strcmp(GOPtype,'IPPP')
+    
+      currentIMG(:,:,l) = ImgsInGOP(:,:,1);
+      [EncodedImgBitStream, reconstactedIMG(:,:,l), cost(l),mse(l),head] = getFrameI(currentIMG(:,:,l),intraBlockSize,delta1,'intra');% change 'intra' to 'none' if u want to
+      HEAD=head'; writeInfile(HEAD(:),savedVideoFileName);
+      writeInfile(EncodedImgBitStream,savedVideoFileName);
+      refImg = reconstactedIMG(:,:,l);
+      l=l+1;
+      
+    for k=2:GOPsize
+       
+      currentIMG(:,:,l) = ImgsInGOP(:,:,k);
+      [EncodedImgBitStream,MotionVectsBitStream,reconstactedIMG(:,:,l), cost(l),mse(l),head] = getFrameP(currentIMG(:,:,l),refImg,searchWind1,searchWind2,interBlockSize,QuantStep(ii));
+      refImg = reconstactedIMG(:,:,l);
+      HEAD=head'; writeInfile(HEAD(:),savedVideoFileName);
+      writeInfile(EncodedImgBitStream,savedVideoFileName);
+      writeInfile(MotionVectsBitStream,savedVideoFileName);
+      l=l+1;
+      
+    end
+end
+
+end
+
+tElapsed(ii) = toc
+out = dir(savedVideoFileName);
+SizE(ii)=(out.bytes)*8              %Bits
+bitRate(ii)=SizE(ii)/(l*rows*cols)      %Bits per pixel
+psnr=10*log10(255^2./mse);
+avrgPSNR(ii)=mean(psnr)        %avrg PSNR
+avrgCOST(ii)=mean(cost)        %avrg Cost
+
+end
+%%
+
+figure;
+plot(psnr,'-xr'); title('RD curve'); 
+
+%%
+
+figure; 
+for i=1:1:nbrGOPsForTest*GOPsize
+subplot(121),image(uint8(currentIMG(:,:,i))); title('original'); colormap(gray(256)); axis image; axis off;
+subplot(122),image(uint8(reconstactedIMG(:,:,i))); title('coded img'); colormap(gray(256)); axis image; axis off;
+pause(0.04) % in seconds 
+end
+
+%  save ThisData
+%  load IIIIallnoneSaves
+%  clear all
